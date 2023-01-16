@@ -1,8 +1,10 @@
 import { IExecutor } from './Executor';
 import ITask from './Task';
 
+type TTaskId = ITask['targetId']
+
 interface IQueue{
-    id: ITask['targetId']
+    id: TTaskId
     tasks: ITask['action'][]
 }
 
@@ -10,6 +12,50 @@ class Executor {
     public static run(executor: IExecutor, queue: AsyncIterable<ITask>, maxThreads = 0) {
         this.iterator = queue[Symbol.asyncIterator]()
         this.executor = executor
+        this.maxThreads = maxThreads
+
+        return new Promise<void>(resolve => this.ender = resolve)
+    }
+    private static ender?: () => void
+
+    private static maxThreads?: number
+    private static tempTask?: ITask | null
+    private static runner() { }
+    private static async runNewThread() {
+        const task = await this.getNextTask()
+        if (task == null)
+            return true
+
+        this.exec(task)
+    }
+
+    private static readonly queue: Map<TTaskId, ITask[]> = new Map()
+    private static getTaskFromId(id: TTaskId) { }
+    private static setTask(task: ITask) { }
+    private static async getNextTask(exemptedId?: TTaskId): Promise<ITask | null> {
+        if (exemptedId != null) {
+            const targetItems = this.queue.get(exemptedId)
+            if (targetItems != null) {
+                if (targetItems.length)
+                    return targetItems.shift()! // Возврат отложенной таски
+                else
+                    this.queue.delete(exemptedId) // освобождение id
+            }
+        }
+
+        while (true) {
+            const task = await this.getNextQueueItem()
+            if (task == null)
+                return null
+
+            // Откладывание таски
+            if (!this.queue.has(task.targetId)) {
+                this.queue.set(task.targetId, [])
+                return task
+            }
+
+            this.queue.get(task.targetId)!.push(task)
+        }
     }
 
     // executor
