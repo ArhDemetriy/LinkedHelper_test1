@@ -13,17 +13,17 @@ export default async function run(executor: IExecutor, queue: AsyncIterable<ITas
     const queuesTask: Map<TTaskId, ITask[]> = new Map()
     /** активные потоки обработки тасков */
     const threads: WeakMap<ITask[], Promise<TTaskId>> = new WeakMap()
-    /** вычисляет возможность запустить дополнительный поток */
-    const existEmptyThreads = () => maxThreads === 0 || queuesTask.size < maxThreads
     /** ожидание первого освободившегося потока */
-    const race = () => Promise.race(Array.from(queuesTask.values()).map(t => threads.get(t)!).filter(p => p))
+    const race = () => Promise.race(Array.from(queuesTask.values()).map(q => threads.get(q)!).filter(t => t))
+    /** вычисляет возможность запустить дополнительный поток */
+    const existEmptyThreads = maxThreads === 0 ? () => true : () => queuesTask.size < maxThreads
 
     /**
      * ! Нельзя запускать одновременно несколько методов с одинаковыми id !
      *
      * Последовательный запуск тасков из массива привязанного к указанному id.
      * Массив можно мутировать пока он доступен в queuesTask.
-     * Метод в конце работы, синхронно удаляет соответсвующее поле из queuesTask.
+     * Метод, в конце работы синхронно удаляет соответсвующее поле из queuesTask.
      *
      * Если по указанному ключу из queuesTask нельзя найти таски, метод завершается немедленно, возвращая переданный ключ.
      * @param id: TTaskId ключ уже существущего, не пустого массива из queuesTask
@@ -56,6 +56,9 @@ export default async function run(executor: IExecutor, queue: AsyncIterable<ITas
             const queue = queuesTask.get(id)
             if (queue != null) {
                 queue.push(task)
+                // защита от быстрой бесконечной очереди, с медленными тасками
+                if (queue.length >= MAX_AWAITED_TASKS && !existEmptyThreads())
+                    await race()
                 continue
             }
         }
