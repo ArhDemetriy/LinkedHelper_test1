@@ -15,7 +15,7 @@ export default async function run(executor: IExecutor, queue: AsyncIterable<ITas
         r(await Promise.race(Array
             .from(queuesTask.values())
             .filter(q => threads.has(q))
-            .map(q => threads.get(q)!)))
+            .map(async q => threads.get(q)!)))
     ));
     /** вычисляет возможность запустить дополнительный поток */
     const existEmptyThreads = maxThreads === 0 ? () => true : () => queuesTask.size < maxThreads;
@@ -57,13 +57,15 @@ export default async function run(executor: IExecutor, queue: AsyncIterable<ITas
         return id;
     }
 
-    let running: boolean
+    let running: boolean;
     do {
-        running = false // внезапнохак под тесты для очередей модифицируемых после окончания последнего в очереди таска
+        running = false; // внезапнохак для очередей модифицируемых после окончания последнего в очереди таска
         for await (const task of queue) {
-            running = true
+            running = true;
             const id = task.targetId;
-            { // пополнение существующей очереди
+
+            // пополнение существующей очереди
+            {
                 const tasks = queuesTask.get(id);
                 if (tasks != null) {
                     tasks.push(task);
@@ -72,17 +74,19 @@ export default async function run(executor: IExecutor, queue: AsyncIterable<ITas
             }
 
             // запуск новой очереди
-            if (!existEmptyThreads()) {
-                await race();
+            {
+                if (!existEmptyThreads()) {
+                    await race();
+                }
+                const newTasks = [task];
+                queuesTask.set(id, newTasks);
+                threads.set(newTasks, thread(id));
             }
-            const newTasks = [task];
-            queuesTask.set(id, newTasks);
-            threads.set(newTasks, thread(id));
         }
 
         await Promise.all(Array
             .from(queuesTask.values())
-            .map(q => threads.get(q)!)
+            .map(async q => threads.get(q))
         );
     } while (running);
 }
