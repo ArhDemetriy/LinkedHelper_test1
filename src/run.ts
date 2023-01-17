@@ -1,22 +1,28 @@
 import { IExecutor } from './Executor';
 import ITask from './Task';
 
-type TTaskId = ITask['targetId']
+type TTaskId = ITask['targetId'];
 
 export default async function run(executor: IExecutor, queue: AsyncIterable<ITask>, maxThreads = 0) {
     maxThreads = Math.max(0, maxThreads);
 
     /** максимум ожидающих тасков для каждого потока */
-    const MAX_AWAITED_TASKS = 3
+    const MAX_AWAITED_TASKS = 3;
 
     /** очереди тасков распределённых по id. size <= maxThreads */
-    const queuesTask: Map<TTaskId, ITask[]> = new Map()
+    const queuesTask: Map<TTaskId, ITask[]> = new Map();
     /** активные потоки обработки тасков */
-    const threads: WeakMap<ITask[], Promise<TTaskId>> = new WeakMap()
+    const threads: WeakMap<ITask[], Promise<TTaskId>> = new WeakMap();
     /** ожидание первого освободившегося потока */
-    const race = () => new Promise<number>(r => setTimeout(() => Promise.race(Array.from(queuesTask.values()).map(q => threads.get(q)!).filter(t => t)).then(r)))
+    const race = async () => new Promise<number>(r => setTimeout(async () =>
+        r(await Promise.race(Array
+            .from(queuesTask.values())
+            .filter(q => threads.has(q))
+            .map(async q => threads.get(q)!)))
+    ));
+
     /** вычисляет возможность запустить дополнительный поток */
-    const existEmptyThreads = maxThreads === 0 ? () => true : () => queuesTask.size < maxThreads
+    const existEmptyThreads = maxThreads === 0 ? () => true : () => queuesTask.size < maxThreads;
 
     /**
      * ! Нельзя запускать одновременно несколько методов с одинаковыми id !
@@ -30,44 +36,56 @@ export default async function run(executor: IExecutor, queue: AsyncIterable<ITas
      * @returns TTaskId удалённый ключ массива из queuesTask, по которому работал метод. На момент выхода из метода в queuesTask этого поля уже нет
      */
     async function thread(id: TTaskId): Promise<number> {
-        const queue = queuesTask.get(id)
-        if (queue == null)
-            return id
-        if (!queue.length)
-            return threads.get(queue) ?? id
+        const tasks = queuesTask.get(id);
+        if (tasks == null) {
+            return id;
+        }
+        if (!tasks.length) {
+            return threads.get(tasks) ?? id;
+        }
 
-        while (queue.length)
-            await executor.executeTask(queue.shift()!)
+        while (tasks.length) {
+            await executor.executeTask(tasks.shift()!);
+        }
 
         // не знаю относится-ли последняя проверка в цикле вверху к текущему микротаску.
         // если точно нельзя встроить микротаск между последней проверкой и кодом ниже, условие можно убрать.
         // это условие - подстраховка на случай мутации массива после проверки останавливающей цикл.
         // код ниже точно синхронный, потому забытых тасков не будет.
-        if (queue.length)
-            return thread(id)
+        if (tasks.length) {
+            return thread(id);
+        }
 
-        queuesTask.delete(id)
-        return id
+        queuesTask.delete(id);
+        return id;
     }
 
     for await (const task of queue) {
-        const id = task.targetId
+        const id = task.targetId;
         { // пополнение существующей очереди
-            const queue = queuesTask.get(id)
-            if (queue != null) {
-                queue.push(task)
+            const tasks = queuesTask.get(id);
+            if (tasks != null) {
+                tasks.push(task);
                 // защита от быстрой бесконечной очереди, с медленными тасками
-                if (queue.length >= MAX_AWAITED_TASKS && !existEmptyThreads())
-                    await race()
-                continue
+                if (tasks.length >= MAX_AWAITED_TASKS && !existEmptyThreads()) {
+                    await race();
+                }
+                continue;
             }
         }
 
         // запуск новой очереди
-        if (!existEmptyThreads())
-            await race()
-        const queue = [task]
-        queuesTask.set(id, queue)
-        threads.set(queue, thread(id))
+        if (!existEmptyThreads()) {
+            await race();
+        }
+        const newTasks = [task];
+        queuesTask.set(id, [task]);
+        threads.set(newTasks, thread(id));
     }
+
+    await Promise.all(Array
+        .from(queuesTask.values())
+        .filter(q => threads.has(q))
+        .map(async q => threads.get(q)!)
+    );
 }
