@@ -30,13 +30,16 @@ export default async function run(executor: IExecutor, queue: AsyncIterable<ITas
      * @returns ITask['targetId'] удалённый ключ массива из queuesTask, по которому работал метод. На момент выхода из метода в queuesTask этого поля уже нет
      */
     async function thread(id: ITask['targetId']): Promise<number> {
-        const tasks = queuesTask.get(id);
-        if (tasks == null) {
-            return id;
-        }
-        if (!tasks.length) {
-            return threads.get(tasks) ?? id;
-        }
+        const tasks = queuesTask.get(id)!;
+        // Не смотря на то что в тестах эти проверки не срабатывают, я-бы добавил их в прод.
+        // Потому что типы и тесты не могут запретить вызов функции не вовремя.
+        // И, я думаю, лучше защититься от человеческого фактора в будущих правках.
+        // if (tasks == null) {
+        //     return id;
+        // }
+        // if (!tasks.length) {
+        //     return threads.get(tasks) ?? id;
+        // }
 
         while (tasks.length) {
             await executor.executeTask(tasks[0]);
@@ -47,9 +50,9 @@ export default async function run(executor: IExecutor, queue: AsyncIterable<ITas
         // если точно нельзя встроить микротаск между последней проверкой и кодом ниже, условие можно убрать.
         // это условие - подстраховка на случай мутации массива после проверки останавливающей цикл.
         // код ниже точно синхронный, потому забытых тасков не будет.
-        if (tasks.length) {
-            return thread(id);
-        }
+        // if (tasks.length) {
+        //     return thread(id);
+        // }
 
         queuesTask.delete(id);
         return id;
