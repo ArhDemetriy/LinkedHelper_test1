@@ -1,15 +1,13 @@
 import { IExecutor } from './Executor';
 import ITask from './Task';
 
-type TTaskId = ITask['targetId'];
-
 export default async function run(executor: IExecutor, queue: AsyncIterable<ITask>, maxThreads = 0) {
     maxThreads = Math.max(0, maxThreads);
 
     /** очереди тасков распределённых по id. size <= maxThreads */
-    const queuesTask: Map<TTaskId, ITask[]> = new Map();
+    const queuesTask: Map<ITask['targetId'], ITask[]> = new Map();
     /** активные потоки обработки тасков */
-    const threads: WeakMap<ITask[], Promise<TTaskId>> = new WeakMap();
+    const threads: WeakMap<ITask[], Promise<ITask['targetId']>> = new WeakMap();
     /** ожидание первого освободившегося потока */
     const race = async () => new Promise<number>(r => setTimeout(async () =>
         r(await Promise.race(Array
@@ -28,10 +26,10 @@ export default async function run(executor: IExecutor, queue: AsyncIterable<ITas
      * Метод, в конце работы синхронно удаляет соответсвующее поле из queuesTask.
      *
      * Если по указанному ключу из queuesTask нельзя найти таски, метод завершается немедленно, возвращая переданный ключ.
-     * @param id: TTaskId ключ уже существущего, не пустого массива из queuesTask
-     * @returns TTaskId удалённый ключ массива из queuesTask, по которому работал метод. На момент выхода из метода в queuesTask этого поля уже нет
+     * @param id: ITask['targetId'] ключ уже существущего, не пустого массива из queuesTask
+     * @returns ITask['targetId'] удалённый ключ массива из queuesTask, по которому работал метод. На момент выхода из метода в queuesTask этого поля уже нет
      */
-    async function thread(id: TTaskId): Promise<number> {
+    async function thread(id: ITask['targetId']): Promise<number> {
         const tasks = queuesTask.get(id);
         if (tasks == null) {
             return id;
